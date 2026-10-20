@@ -1,0 +1,228 @@
+#!/usr/bin/env python3
+"""Fetch RSS/Atom feeds and print one combined, newest-first article list as JSON."""
+import argparse
+from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
+from html import unescape
+from html.parser import HTMLParser
+import json
+import re
+import sys
+from urllib.parse import urljoin, urlsplit
+from urllib.request import Request, urlopen
+import xml.etree.ElementTree as ET
+
+MAX_BYTES = 8 * 1024 * 1024
+SUMMARY_CHARS = 280
+IMAGE_EXTENSIONS = ('.jpg', '.jpeg', '.png', '.webp', '.gif', '.avif')
+
+
+def local(tag):
+    return tag.rsplit('}', 1)[-1].lower() if isinstance(tag, str) else ''
+
+
+def ns(tag):
+    return tag[1:].split('}', 1)[0] if isinstance(tag, str) and tag.startswith('{') else ''
+
+
+def children(element, name):
+    return [child for child in element if local(child.tag) == name]
+
+
+def first_text(element, *names):
+    for name in names:
+        for child in children(element, name):
+            text = ''.join(child.itertext()).strip()
+            if text:
+                return text
+    return ''
+
+
+class _TextAndImage(HTMLParser):
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.parts = []
+        self.image = ''
+        self.skip = 0
+
+    def handle_starttag(self, tag, attrs):
+        if tag in ('script', 'style'):
+            self.skip += 1
+        elif tag == 'img' and not self.image:
+            self.image = dict(attrs).get('src') or ''
+        elif tag in ('p', 'br', 'div', 'li'):
+            self.parts.append(' ')
+
+    def handle_endtag(self, tag):
+        if tag in ('script', 'style') and self.skip:
+            self.skip -= 1
+
+    def handle_data(self, data):
+        if not self.skip:
+            self.parts.append(data)
+
+
+def html_to_text(markup):
+    """Return (plain text, first <img> src) for an HTML fragment."""
+    parser = _TextAndImage()
+    try:
+        parser.feed(markup or '')
+        parser.close()
+    except Exception:
+        return re.sub(r'\s+', ' ', unescape(re.sub(r'<[^>]+>', ' ', markup or ''))).strip(), ''
+    return re.sub(r'\s+', ' ', ''.join(parser.parts)).strip(), parser.image
+
+
+def shorten(text, limit=SUMMARY_CHARS):
+    if len(text) <= limit:
+        return text
+    cut = text[:limit].rsplit(' ', 1)[0].rstrip(' ,.;:-')
+    return cut + '…'
+
+
+def parse_date(value):
+    value = (value or '').strip()
+    if not value:
+        return None
+    parsed = None
+    try:
+        parsed = parsedate_to_datetime(value)
+    except (TypeError, ValueError, IndexError):
+        try:
+            parsed = datetime.fromisoformat(value.replace('Z', '+00:00'))
+        except ValueError:
+            return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed
+
+
+def is_image(url, mime='', medium=''):
+    if medium == 'image' or mime.startswith('image/'):
+        return True
+    if mime or medium:
+        return False
+    return urlsplit(url).path.lower().endswith(IMAGE_EXTENSIONS)
+
+
+def find_image(item):
+    """Best image for an item from media:*, enclosures, itunes:image or atom enclosure links."""
+    candidates = []
+    for element in item.iter():
+        name = local(element.tag)
+        url = element.get('url') or element.get('href') or ''
+        if name == 'thumbnail' and url:
+            return url
+        if name == 'content' and url and is_image(url, element.get('type', ''), element.get('medium', '')):
+            candidates.append(url)
+        elif name == 'enclosure' and url and is_image(url, element.get('type', '')):
+            candidates.append(url)
+        elif name == 'link' and element.get('rel') == 'enclosure' and url and is_image(url, element.get('type', '')):
+            candidates.append(url)
+        elif name == 'image' and 'itunes' in ns(element.tag) and url:
+            candidates.append(url)
+    return candidates[0] if candidates else ''
+
+
+def atom_link(entry):
+    links = children(entry, 'link')
+    for link in links:
+        if link.get('rel', 'alternate') == 'alternate' and link.get('href'):
+            return link.get('href')
+    for link in links:
+        if link.get('href'):
+            return link.get('href')
+        if (link.text or '').strip():
+            return link.text.strip()
+    return ''
+
+
+def parse_feed(data, base_url=''):
+    """Parse RSS 2.0, RSS 1.0 (RDF) or Atom bytes into (feed title, [item dicts])."""
+    root = ET.fromstring(data)
+    kind = local(root.tag)
+    if kind == 'feed':
+        channel, entries = root, children(root, 'entry')
+    elif kind in ('rss', 'rdf'):
+        channel = next(iter(children(root, 'channel')), root)
+        entries = children(channel, 'item') or children(root, 'item')
+    else:
+        raise ValueError('Not an RSS or Atom feed')
+    feed_title = first_text(channel, 'title') or urlsplit(base_url).netloc
+    items = []
+    for entry in entries:
+        title_html = first_text(entry, 'title')
+        title = html_to_text(title_html)[0] or '(untitled)'
+        link = atom_link(entry) if kind == 'feed' else (first_text(entry, 'link') or atom_link(entry))
+        if not link:
+            guid = children(entry, 'guid')
+            if guid and guid[0].get('isPermaLink', 'true') != 'false':
+                link = (guid[0].text or '').strip()
+        body = first_text(entry, 'description', 'summary', 'encoded', 'content')
+        summary, inline_image = html_to_text(body)
+        if not inline_image:
+            inline_image = html_to_text(first_text(entry, 'encoded', 'content'))[1]
+        image = find_image(entry) or inline_image
+        when = parse_date(first_text(entry, 'pubdate', 'published', 'updated', 'date', 'issued'))
+        items.append({
+            'title': title,
+            'link': urljoin(base_url, link) if link else '',
+            'summary': shorten(summary),
+            'image': urljoin(base_url, image) if image and not image.startswith('data:') else '',
+            'timestamp': int(when.timestamp()) if when else 0,
+            'feed': feed_title,
+        })
+    return feed_title, items
+
+
+def fetch(url, timeout=20):
+    if urlsplit(url).scheme not in ('http', 'https'):
+        raise ValueError('Only http(s) feed URLs are supported')
+    request = Request(url, headers={
+        'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) kOMA-RSS/0.1',
+        'Accept': 'application/rss+xml, application/atom+xml, application/xml;q=0.9, text/xml;q=0.8, */*;q=0.5',
+    })
+    with urlopen(request, timeout=timeout) as response:
+        data = response.read(MAX_BYTES + 1)
+        final_url = response.geturl()
+    if len(data) > MAX_BYTES:
+        raise ValueError('Feed is too large')
+    return data, final_url
+
+
+def load(url):
+    try:
+        data, final_url = fetch(url)
+        return parse_feed(data, final_url)[1], None
+    except Exception as error:  # report every failure per-feed, keep the rest
+        return [], {'url': url, 'error': str(getattr(error, 'reason', None) or error)}
+
+
+def combine(urls, limit):
+    urls = list(dict.fromkeys(u.strip() for u in urls if u.strip()))
+    items, errors, seen = [], [], set()
+    with ThreadPoolExecutor(max_workers=min(8, max(1, len(urls)))) as pool:
+        for feed_items, error in pool.map(load, urls):
+            if error:
+                errors.append(error)
+            for item in feed_items:
+                key = item['link'] or (item['feed'], item['title'])
+                if key not in seen:
+                    seen.add(key)
+                    items.append(item)
+    items.sort(key=lambda item: item['timestamp'], reverse=True)
+    return {'items': items[:limit], 'errors': errors, 'fetched': int(datetime.now(timezone.utc).timestamp())}
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--max', type=int, default=100, help='maximum number of articles (default 100)')
+    parser.add_argument('urls', nargs='*', help='feed URLs')
+    args = parser.parse_args()
+    json.dump(combine(args.urls, max(1, args.max)), sys.stdout, ensure_ascii=False)
+    sys.stdout.write('\n')
+
+
+if __name__ == '__main__':
+    main()

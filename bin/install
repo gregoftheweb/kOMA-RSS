@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+set -euo pipefail
+[[ $# -eq 0 || ( $# -eq 1 && $1 == --no-place ) ]] || { echo 'Usage: bin/install [--no-place]' >&2; exit 2; }
+repo="$(cd "$(dirname "$0")/.." && pwd)"
+data="${XDG_DATA_HOME:-$HOME/.local/share}"
+id=com.columbiafoundry.komarss
+if [[ -d "$data/plasma/plasmoids/$id" ]]; then
+  kpackagetool6 --type Plasma/Applet --upgrade "$repo"
+else
+  kpackagetool6 --type Plasma/Applet --install "$repo"
+fi
+mkdir -p "$HOME/.local/bin"
+ln -sfn "$data/plasma/plasmoids/$id/contents/code/komarss" "$HOME/.local/bin/komarss"
+if [[ ${1:-} != --no-place ]]; then
+  qdbus6 org.kde.plasmashell /PlasmaShell org.kde.PlasmaShell.evaluateScript \
+    "var p = panels()[0]; if (p && p.widgets('$id').length === 0) p.addWidget('$id'); print('kOMA RSS placed on a panel');"
+fi

@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:media="http://search.yahoo.com/mrss/" xmlns:content="http://purl.org/rss/1.0/modules/content/">
+<channel><title>Example News</title><link>https://example.com/</link>
+<item><title>Older &amp; plain</title><link>https://example.com/old</link>
+<pubDate>Mon, 01 Jan 2024 10:00:00 GMT</pubDate>
+<description>&lt;p&gt;Hello &lt;b&gt;world&lt;/b&gt;&lt;/p&gt;&lt;img src="/inline.jpg"&gt;</description></item>
+<item><title>Newer with media</title><link>https://example.com/new</link>
+<pubDate>Tue, 02 Jan 2024 10:00:00 +0000</pubDate>
+<media:thumbnail url="https://cdn.example.com/thumb.jpg"/>
+<description>Summary text</description></item>
+<item><title>Enclosure</title><guid>https://example.com/enc</guid>
+<enclosure url="https://cdn.example.com/a.mp3" type="audio/mpeg"/>
+<enclosure url="https://cdn.example.com/pic.png" type="image/png"/></item>
+</channel></rss>

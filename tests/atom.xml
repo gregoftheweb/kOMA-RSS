@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+<title>Atom Blog</title>
+<entry><title type="html">Atom &lt;em&gt;entry&lt;/em&gt;</title>
+<link rel="alternate" href="https://blog.example.org/post"/>
+<link rel="enclosure" type="image/jpeg" href="https://blog.example.org/hero.jpg"/>
+<updated>2024-01-03T08:00:00Z</updated>
+<summary>Atom summary</summary></entry>
+</feed>

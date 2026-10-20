@@ -1,0 +1,14 @@
+{
+  "KPackageStructure": "Plasma/Applet",
+  "KPlugin": {
+    "Id": "com.columbiafoundry.komarss",
+    "Name": "kOMA RSS",
+    "Description": "One combined, newest-first list of articles from your RSS and Atom feeds",
+    "Icon": "application-rss+xml",
+    "Authors": [{ "Name": "Columbia Foundry" }],
+    "License": "MIT",
+    "Version": "0.4.0",
+    "Category": "Online Services"
+  },
+  "X-Plasma-API-Minimum-Version": "6.0"
+}
