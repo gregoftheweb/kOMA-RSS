@@ -1,6 +1,7 @@
 pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Layouts
+import QtQuick.Shapes
 import org.kde.plasma.plasmoid
 import org.kde.plasma.core as PlasmaCore
 import org.kde.plasma.components as PC3
@@ -30,6 +31,55 @@ PlasmoidItem {
     }
     switchWidth: Kirigami.Units.gridUnit * 16
     switchHeight: Kirigami.Units.gridUnit * 16
+
+    compactRepresentation: MouseArea {
+        implicitWidth: Kirigami.Units.iconSizes.medium
+        implicitHeight: Kirigami.Units.iconSizes.medium
+        onClicked: root.expanded = !root.expanded
+        cursorShape: Qt.PointingHandCursor
+
+        Item {
+            id: rssIcon
+            anchors.centerIn: parent
+            width: Math.max(0, Math.min(parent.width, parent.height, Kirigami.Units.iconSizes.medium) - 2)
+            height: width
+
+            Shape {
+                anchors.centerIn: parent
+                width: 24
+                height: 24
+                scale: rssIcon.width / 24
+
+                ShapePath {
+                    strokeColor: Kirigami.Theme.highlightColor
+                    strokeWidth: 2.8
+                    capStyle: ShapePath.RoundCap
+                    fillColor: "transparent"
+                    startX: 4
+                    startY: 3
+                    PathArc { x: 21; y: 20; radiusX: 17; radiusY: 17 }
+                }
+                ShapePath {
+                    strokeColor: Kirigami.Theme.highlightColor
+                    strokeWidth: 2.8
+                    capStyle: ShapePath.RoundCap
+                    fillColor: "transparent"
+                    startX: 4
+                    startY: 10
+                    PathArc { x: 14; y: 20; radiusX: 10; radiusY: 10 }
+                }
+                Rectangle {
+                    x: 2
+                    y: 18
+                    width: 4
+                    height: 4
+                    radius: 2
+                    color: Kirigami.Theme.highlightColor
+                }
+            }
+        }
+    }
+
     Plasmoid.contextualActions: [
         PlasmaCore.Action {
             text: "Refresh Feeds"
